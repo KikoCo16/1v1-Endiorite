@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>🔴🟡 Puissance 4 1v1</title>
+<style>
+*{box-sizing:border-box}
+body{
+  margin:0;
+  min-height:100vh;
+  background:radial-gradient(circle at top,#0f172a,#020617);
+  font-family:system-ui,Arial;
+  color:#f0f9ff;
+  display:flex;
+  justify-content:center;
+  align-items:flex-start; /* par défaut en haut */
+  padding:20px;
+  transition: all 0.3s;
+}
+
+body.empty {
+  align-items:center; /* centré verticalement quand vide */
+}
+
+.container{
+  width:100%;
+  max-width:420px;
+  background:#0b1120;
+  border-radius:16px;
+  padding:20px;
+  border:1px solid #1e3a8a;
+
+  display:flex;
+  flex-direction:column;
+  justify-content:flex-start;
+}
+h1{text-align:center;color:#f87171;margin-bottom:5px;}
+.credits{
+  text-align:center;
+  font-size:22px;
+  font-weight:bold;
+  margin-bottom:10px;
+  color:#3b82f6;
+}
+button,input{
+  width:100%;
+  padding:12px;
+  margin:6px 0;
+  border-radius:10px;
+  border:none;
+  font-size:16px;
+}
+button{
+  background:linear-gradient(135deg,#3b82f6,#1d4ed8);
+  color:#fff;
+  font-weight:700;
+}
+.board{
+  display:grid;
+  grid-template-columns:repeat(7,1fr);
+  gap:6px;
+  margin-top:10px;
+}
+.cell{
+  width:100%;
+  aspect-ratio:1/1;
+  font-size:30px;
+  font-weight:bold;
+  background:#020617;
+  border-radius:50%;
+  display:flex;
+  justify-content:center;
+  align-items:center;
+  cursor:pointer;
+}
+.cell.spectator{
+  cursor:default;
+}
+.list{margin-top:10px}
+.challenge{
+  background:#020617;
+  padding:10px;
+  border-radius:10px;
+  margin-bottom:6px;
+}
+.msg{text-align:center;margin:10px 0;color:#7dd3fc}
+.info{text-align:center;margin:5px 0;color:#a5b4fc;font-size:16px;}
+
+/* MODAL */
+.modal{
+  position:fixed;
+  inset:0;
+  background:rgba(0,0,0,0.75);
+  display:none;
+  justify-content:center;
+  align-items:center;
+  z-index:999;
+}
+.modal-content{
+  background:#0b1120;
+  padding:20px;
+  border-radius:16px;
+  width:90%;
+  max-width:300px;
+  text-align:center;
+}
+</style>
+</head>
+<body>
+<div class="container">
+<h1>
+    <span style="color:blue;"> Puissance 4</span>
+  <span style="color:yellow;">1</span>
+  <span style="color:blue;">v</span>
+  <span style="color:red;">1</span>
+</h1>
+<div class="credits">💰 <span id="credits">0</span> crédits</div>
+
+<input id="bet" type="number" placeholder="Mise">
+<button id="createBtn">Créer un défi</button>
+
+<div class="list" id="challenges"></div>
+<div class="info" id="gameInfo"></div>
+<div class="board" id="board"></div>
+<div class="msg" id="msg"></div>
+
+<button onclick="location.href='https://kikoco16.github.io/Casino-Endiorite/'">⬅ Retour</button>
+  
+<!-- MODAL RESULTAT -->
+<div class="modal" id="resultModal">
+  <div class="modal-content">
+    <p id="resultMsg"></p>
+    <button id="closeResultBtn">✅ OK</button>
+  </div>
+</div> 
+  
+</div>
+
+<!-- MODAL -->
+<div class="modal" id="waitingModal">
+  <div class="modal-content">
+    <p>⏳ En attente d’un adversaire…</p>
+    <button id="cancelBtn">❌ Annuler le défi</button>
+  </div>
+</div>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/12.8.0/firebase-app.js";
+import { getDatabase, ref, get, set, update, onValue, remove } from "https://www.gstatic.com/firebasejs/12.8.0/firebase-database.js";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyDAQALLN99kqiYY4UZz9wl2stedP5KQ5mA",
+  databaseURL: "https://casino-b23c9-default-rtdb.europe-west1.firebasedatabase.app",
+};
+const app = initializeApp(firebaseConfig);
+const db = getDatabase(app);
+
+const user = localStorage.getItem("casinoUser");
+if(!user){ alert("Vous devez être connecté"); location.href="https://kikoco16.github.io/Casino-Endiorite/"; }
+
+const creditsEl = document.getElementById("credits");
+const modal = document.getElementById("waitingModal");
+const cancelBtn = document.getElementById("cancelBtn");
+const boardEl = document.getElementById("board");
+const msg = document.getElementById("msg");
+const challengesEl = document.getElementById("challenges");
+const gameInfo = document.getElementById("gameInfo");
+
+let currentChallenge = null;
+
+// 🪙 Crédits live
+onValue(ref(db,"users/"+user+"/credits"), s=>{
+  creditsEl.textContent = s.exists()?s.val():0;
+});
+
+// ➕ Créer défi
+document.getElementById("createBtn").onclick = async ()=>{
+  const bet = parseInt(document.getElementById("bet").value);
+  if(!bet || bet<=0) return;
+
+  const userRef = ref(db,"users/"+user);
+  const snap = await get(userRef);
+  if(bet > snap.val().credits) return alert("Crédits insuffisants");
+
+  await update(userRef,{ credits: snap.val().credits - bet });
+
+  const id = Date.now();
+  await set(ref(db,"défis1v1/"+id),{
+    status:"waiting",
+    bet,
+    board:Array(6).fill(0).map(()=>Array(7).fill("")),
+    currentTurn:"player1",
+    players:{ player1:{ uid:user, symbol:"🔴" } }
+  });
+};
+
+// Observer défis
+onValue(ref(db,"défis1v1"), snap=>{
+  challengesEl.innerHTML="";
+  modal.style.display="none";
+  boardEl.innerHTML="";
+  gameInfo.textContent="";
+  msg.textContent="";
+
+  const hasContent = snap.exists() || boardEl.children.length>0;
+  
+  if(!hasContent){
+    document.body.classList.add("empty");
+  } else {
+    document.body.classList.remove("empty");
+  }
+
+  snap.forEach(ch=>{
+    const c = ch.val();
+    const id = ch.key;
+    const playersArr = Object.values(c.players||{});
+    const isMe = playersArr.some(p=>p.uid===user);
+
+    // MODAL ATTENTE
+    if(isMe && c.status==="waiting"){
+      currentChallenge=id;
+      modal.style.display="flex";
+      cancelBtn.onclick = async ()=>{
+        const bet = c.bet;
+        const userRef = ref(db,"users/"+user);
+        const us = await get(userRef);
+        await update(userRef,{ credits: us.val().credits + bet });
+        await remove(ref(db,"défis1v1/"+id));
+      };
+      return;
+    }
+
+    // LISTE DES DEFIS ACCEPTABLES
+    if(c.status==="waiting" && !isMe){
+      const div=document.createElement("div");
+      div.className="challenge";
+      div.innerHTML=`${playersArr[0].uid} défie... Mise : ${c.bet}<button>Accepter</button>`;
+      div.querySelector("button").onclick=()=>join(id,c.bet);
+      challengesEl.appendChild(div);
+    }
+
+    // JEU (participants ou spectateurs)
+    if(c.status==="playing" || isMe){
+      currentChallenge=id;
+      renderGame(c);
+    }
+  });
+});
+
+// Rejoindre
+async function join(id,bet){
+  const userRef = ref(db,"users/"+user);
+  const snap = await get(userRef);
+  if(bet > snap.val().credits) return alert("Crédits insuffisants");
+
+  await update(userRef,{ credits: snap.val().credits - bet });
+  await update(ref(db,"défis1v1/"+id),{
+    status:"playing",
+    "players/player2":{ uid:user, symbol:"🟡" }
+  });
+}
+
+// Jeu et rendu
+function renderGame(c){
+  boardEl.innerHTML="";
+  const role = Object.keys(c.players).find(k=>c.players[k].uid===user);
+  const isParticipant = !!role;
+
+  const p2Name = c.players.player2?.uid || "...";
+  gameInfo.textContent=`${c.players.player1.uid} (🔴) vs ${p2Name} (🟡) | Mise : ${c.bet}`;
+  if(isParticipant){
+    msg.textContent=`Tour de : ${c.players[c.currentTurn].uid}`;
+  } else {
+    msg.textContent="Spectateur 👀";
+  }
+
+  c.board.forEach((row,rIdx)=>{
+    row.forEach((v,cIdx)=>{
+      const cell=document.createElement("div");
+      cell.className="cell"+(isParticipant?"":" spectator");
+      cell.textContent=v;
+      if(isParticipant) cell.onclick=()=>play(cIdx,c);
+      boardEl.appendChild(cell);
+    });
+  });
+}
+
+// Jouer
+async function play(col,c){
+  const role=Object.keys(c.players).find(k=>c.players[k].uid===user);
+  if(!role || c.currentTurn!==role || c.status!=="playing") return;
+
+  // Trouver la ligne la plus basse vide
+  let row = -1;
+  for(let r=5;r>=0;r--){
+    if(!c.board[r][col]){
+      row=r;
+      break;
+    }
+  }
+  if(row===-1) return;
+
+  c.board[row][col]=c.players[role].symbol;
+
+  const win = checkWin(c.board,row,col,c.players[role].symbol);
+
+  if(win){
+    await finishGame(c, role);
+    return;
+  }
+
+  if(c.board.every(r=>r.every(v=>v))){
+    await finishGame(c,"draw");
+    return;
+  }
+
+  await update(ref(db,"défis1v1/"+currentChallenge),{
+    board:c.board,
+    currentTurn: role==="player1"?"player2":"player1"
+  });
+}
+
+// Fin de partie
+async function finishGame(c,result){
+  const bet = c.bet;
+  const players = c.players;
+  const role=Object.keys(players).find(k=>players[k].uid===user); // rôle du joueur
+
+  let message="";
+
+  if(result==="draw"){
+    for(const p of Object.values(players)){
+      const uRef = ref(db,"users/"+p.uid);
+      const us = await get(uRef);
+      await update(uRef,{ credits: us.val().credits + bet });
+    }
+    message="🤝 Match nul – mise remboursée";
+  } else {
+    const winner = players[result].uid;
+    const uRef = ref(db,"users/"+winner);
+    const us = await get(uRef);
+    await update(uRef,{ credits: us.val().credits + bet*2 });
+
+    if(players[role].uid === winner){
+      message=`🏆 Vous avez gagné ! Victoire contre ${Object.values(players).find(p=>p.uid!==user).uid}`;
+    } else {
+      message=`💀 Vous avez perdu ! Victoire de ${winner}`;
+    }
+  }
+
+  // Afficher le modal
+  const resultModal = document.getElementById("resultModal");
+  const resultMsg = document.getElementById("resultMsg");
+  const closeBtn = document.getElementById("closeResultBtn");
+
+  resultMsg.textContent = message;
+  resultModal.style.display = "flex";
+
+  // Fermer le modal
+  closeBtn.onclick = () => {
+    resultModal.style.display = "none";
+  };
+
+  await remove(ref(db,"défis1v1/"+currentChallenge));
+}
+
+// Détection victoire Puissance 4
+function checkWin(board,row,col,symbol){
+  // directions: [dx,dy]
+  const dirs=[[1,0],[0,1],[1,1],[1,-1]];
+  for(const [dx,dy] of dirs){
+    let count=1;
+    for(let d=1;d<4;d++){
+      const r=row+dy*d, c=col+dx*d;
+      if(r<0||r>=6||c<0||c>=7) break;
+      if(board[r][c]===symbol) count++; else break;
+    }
+    for(let d=1;d<4;d++){
+      const r=row-dy*d, c=col-dx*d;
+      if(r<0||r>=6||c<0||c>=7) break;
+      if(board[r][c]===symbol) count++; else break;
+    }
+    if(count>=4) return true;
+  }
+  return false;
+}
+</script>
+</body>
+</html>
