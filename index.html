@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>❌⭕ Morpion 1v1</title>
+
+<style>
+*{box-sizing:border-box}
+body{
+  margin:0;
+  min-height:100vh;
+  background:radial-gradient(circle at top,#0f172a,#020617);
+  font-family:system-ui,Arial;
+  color:#f0f9ff;
+  display:flex;
+  justify-content:center;
+  padding:20px;
+}
+.container{
+  width:100%;
+  max-width:420px;
+  background:#0b1120;
+  border-radius:16px;
+  padding:20px;
+  border:1px solid #1e3a8a;
+}
+h1{text-align:center;color:#60a5fa}
+.credits{
+  text-align:center;
+  font-size:22px;
+  font-weight:bold;
+  margin-bottom:10px;
+  color:#3b82f6;
+}
+button,input{
+  width:100%;
+  padding:12px;
+  margin:6px 0;
+  border-radius:10px;
+  border:none;
+  font-size:16px;
+}
+button{
+  background:linear-gradient(135deg,#3b82f6,#1d4ed8);
+  color:#fff;
+  font-weight:700;
+}
+.board{
+  display:grid;
+  grid-template-columns:repeat(3,1fr);
+  gap:8px;
+  margin-top:10px;
+}
+.cell{
+  height:90px;
+  font-size:40px;
+  font-weight:bold;
+  background:#020617;
+  border-radius:10px;
+  display:flex;
+  justify-content:center;
+  align-items:center;
+  cursor:pointer;
+}
+.list{margin-top:10px}
+.challenge{
+  background:#020617;
+  padding:10px;
+  border-radius:10px;
+  margin-bottom:6px;
+}
+.msg{text-align:center;margin:10px 0;color:#7dd3fc}
+</style>
+</head>
+
+<body>
+<div class="container">
+<h1>❌⭕ Morpion 1v1</h1>
+
+<div class="credits">💰 <span id="credits">0</span> crédits</div>
+
+<input id="bet" type="number" placeholder="Mise">
+<button id="createBtn">Créer un défi</button>
+
+<div class="list" id="challenges"></div>
+<div class="board" id="board"></div>
+<div class="msg" id="msg"></div>
+
+<button onclick="location.href='https://kikoco16.github.io/Casino-Endiorite/'">⬅ Retour</button>
+</div>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/12.8.0/firebase-app.js";
+import { getDatabase, ref, get, set, update, onValue } from "https://www.gstatic.com/firebasejs/12.8.0/firebase-database.js";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyDAQALLN99kqiYY4UZz9wl2stedP5KQ5mA",
+  databaseURL: "https://casino-b23c9-default-rtdb.europe-west1.firebasedatabase.app",
+};
+const app = initializeApp(firebaseConfig);
+const db = getDatabase(app);
+
+// 🔐 Connexion obligatoire
+const user = localStorage.getItem("casinoUser");
+if(!user){
+  alert("Vous devez être connecté");
+  window.location.href="https://kikoco16.github.io/Casino-Endiorite/";
+}
+
+// 🪙 Crédits
+const creditsEl = document.getElementById("credits");
+onValue(ref(db,"users/"+user+"/credits"), snap=>{
+  creditsEl.textContent = snap.exists()?snap.val():0;
+});
+
+const challengesEl = document.getElementById("challenges");
+const boardEl = document.getElementById("board");
+
+let currentChallenge = null;
+
+// ➕ Créer défi
+document.getElementById("createBtn").onclick = async ()=>{
+  const bet = parseInt(document.getElementById("bet").value);
+  if(!bet || bet<=0) return;
+
+  const userRef = ref(db,"users/"+user);
+  const snap = await get(userRef);
+  if(bet > snap.val().credits) return alert("Crédits insuffisants");
+
+  await update(userRef,{ credits: snap.val().credits - bet });
+
+  const id = Date.now();
+  await set(ref(db,"défis1v1/"+id),{
+    status:"waiting",
+    bet,
+    board:["","","","","","","","",""],
+    currentTurn:"player1",
+    players:{ player1:{ uid:user, symbol:"X" } }
+  });
+};
+
+// 📋 Liste défis
+onValue(ref(db,"défis1v1"), snap=>{
+  challengesEl.innerHTML="";
+  snap.forEach(ch=>{
+    const c = ch.val();
+    if(c.status!=="waiting") return;
+    if(c.players.player1.uid===user) return;
+
+    const div=document.createElement("div");
+    div.className="challenge";
+    div.innerHTML=`Mise : ${c.bet}<button>Accepter</button>`;
+    div.querySelector("button").onclick=()=>joinChallenge(ch.key,c.bet);
+    challengesEl.appendChild(div);
+  });
+});
+
+// 🤝 Rejoindre
+async function joinChallenge(id,bet){
+  const userRef = ref(db,"users/"+user);
+  const snap = await get(userRef);
+  if(bet > snap.val().credits) return alert("Crédits insuffisants");
+
+  await update(userRef,{ credits: snap.val().credits - bet });
+  await update(ref(db,"défis1v1/"+id),{
+    status:"playing",
+    "players/player2":{ uid:user, symbol:"O" }
+  });
+
+  loadGame(id);
+}
+
+// 🎮 Jeu
+function loadGame(id){
+  currentChallenge=id;
+  onValue(ref(db,"défis1v1/"+id), snap=>{
+    const c=snap.val();
+    if(!c) return;
+
+    boardEl.innerHTML="";
+    c.board.forEach((v,i)=>{
+      const cell=document.createElement("div");
+      cell.className="cell";
+      cell.textContent=v;
+      cell.onclick=()=>play(i,c);
+      boardEl.appendChild(cell);
+    });
+  });
+}
+
+async function play(i,c){
+  const role=Object.keys(c.players).find(k=>c.players[k].uid===user);
+  if(c.currentTurn!==role || c.board[i]) return;
+
+  c.board[i]=c.players[role].symbol;
+  const next=role==="player1"?"player2":"player1";
+
+  await update(ref(db,"défis1v1/"+currentChallenge),{
+    board:c.board,
+    currentTurn:next
+  });
+}
+</script>
+</body>
+</html>
